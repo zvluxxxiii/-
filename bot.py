@@ -2,13 +2,16 @@ import asyncio
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.enums import ParseMode
+import re
 
+# Токен и ID группы
 TOKEN = "7307810781:AAFUOkaJr1YfbYrMVa6J6wV6xUuesG1zDF8"
 GROUP_ID = -1002294772560
 
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
+# Приветственное сообщение
 WELCOME_TEXT = """
 ⋆｡°✩₊
 /ᐠ – ˕ –マ
@@ -31,42 +34,34 @@ WELCOME_TEXT = """
 укажи хештег в конце сообщения — например: #мики
 """
 
-# /start → приветствие
+# Обработка команды /start
 @dp.message(F.text == "/start", F.chat.type == "private")
 async def handle_start(message: Message):
     await message.answer(WELCOME_TEXT)
 
-# ЛС → пересылка в группу
+# Пересылка личных сообщений в группу
 @dp.message(F.chat.type == "private", F.text)
-async def handle_private_message(message: Message):
+async def handle_private(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or "без ника"
     text = message.text
 
     await bot.send_message(
         GROUP_ID,
-        f"<b>✉️ Сообщение от @{username}</b>\n"
-        f"<i>{text}</i>\n\n"
-        f"<code>[user_id:{user_id}]</code>"
+        f"<b>✉️ Сообщение от @{username} (ID: <code>{user_id}</code>):</b>\n\n<i>{text}</i>\n\n[user_id:{user_id}]"
     )
 
-# Ответ из группы → в личку
+# Ответ из группы обратно в ЛС пользователя
 @dp.message(F.chat.id == GROUP_ID, F.reply_to_message)
 async def handle_group_reply(message: Message):
-    original = message.reply_to_message
-    if not original or not original.text:
-        return
+    original_text = message.reply_to_message.text
 
-    lines = original.text.splitlines()
-    for line in lines:
-        if line.startswith("<code>[user_id:") and line.endswith("]</code>"):
-            try:
-                user_id = int(line.split(":")[1].split("]")[0])
-                await bot.send_message(chat_id=user_id, text=message.text)
-            except:
-                pass
+    match = re.search(r"\[user_id:(\d+)\]", original_text)
+    if match:
+        user_id = int(match.group(1))
+        await bot.send_message(chat_id=user_id, text=message.text)
 
-# ← ← ← ← ← ВОТ ЭТО ОБЯЗАТЕЛЬНО
+# Запуск бота
 async def main():
     await dp.start_polling(bot)
 
