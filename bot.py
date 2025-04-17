@@ -36,7 +36,7 @@ WELCOME_TEXT = """
 async def handle_start(message: Message):
     await message.answer(WELCOME_TEXT)
 
-# ЛС → пересылка в группу (вставляем ID прямо в текст)
+# ЛС → пересылка в группу
 @dp.message(F.chat.type == "private", F.text)
 async def handle_private_message(message: Message):
     user_id = message.from_user.id
@@ -47,17 +47,16 @@ async def handle_private_message(message: Message):
         GROUP_ID,
         f"<b>✉️ Сообщение от @{username}</b>\n"
         f"<i>{text}</i>\n\n"
-        f"<code>[user_id:{user_id}]</code>"  # <-- скрытая метка, по которой бот будет отвечать
+        f"<code>[user_id:{user_id}]</code>"
     )
 
-# Ответ в группе → бот ищет user_id в сообщении, на которое ответили
+# Ответ из группы → в личку
 @dp.message(F.chat.id == GROUP_ID, F.reply_to_message)
 async def handle_group_reply(message: Message):
     original = message.reply_to_message
     if not original or not original.text:
         return
 
-    # Пытаемся вытащить user_id из текста
     lines = original.text.splitlines()
     for line in lines:
         if line.startswith("<code>[user_id:") and line.endswith("]</code>"):
@@ -66,3 +65,10 @@ async def handle_group_reply(message: Message):
                 await bot.send_message(chat_id=user_id, text=message.text)
             except:
                 pass
+
+# ← ← ← ← ← ВОТ ЭТО ОБЯЗАТЕЛЬНО
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
