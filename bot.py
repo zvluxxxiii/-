@@ -44,8 +44,7 @@ WELCOME_TEXT = """
 async def handle_start(message: Message):
     await message.answer(WELCOME_TEXT)
 
-# Антиспам
-def is_spammer(user_id):
+def is_spammer(user_id: int) -> bool:
     now = time.time()
 
     if user_id in user_blocked:
@@ -55,51 +54,51 @@ def is_spammer(user_id):
             del user_blocked[user_id]
 
     user_activity.setdefault(user_id, [])
-    user_activity[user_id] = [t for t in user_activity[user_id] if now - t <= SPAM_SECONDS]
+    user_activity[user_id] = [t for t in user_activity[user_id] if now - t < SPAM_SECONDS]
     user_activity[user_id].append(now)
 
     if len(user_activity[user_id]) > SPAM_LIMIT:
         user_blocked[user_id] = now + BLOCK_DURATION
+        asyncio.create_task(bot.send_message(GROUP_ID, f"⚠️ Пользователь <code>{user_id}</code> автоматически заблокирован на 30 минут за спам."))
         return True
 
     return False
 
-# Обработка ЛС
+# ЛС → группа
 @dp.message(F.chat.type == "private")
 async def handle_private(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or "без ника"
     header = f"Сообщение от @{username}"
-    invisible_tag = f"<a href='tg://user?id={user_id}'>\u2063</a>"  # невидимая метка
+    hidden = f"<a href='tg://user?id={user_id}'>\u2063</a>"  # невидимый user_id
 
     if is_spammer(user_id):
-        await message.answer("⏳ Вы временно заблокированы. Попробуйте позже.")
+        await message.answer("⏳ Вы временно заблокированы за спам. Подождите немного.")
         return
 
-    # Отправляем в зависимости от типа
     if message.content_type == ContentType.TEXT:
-        await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}{invisible_tag}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}{hidden}")
 
     elif message.content_type == ContentType.PHOTO:
-        await bot.send_photo(GROUP_ID, message.photo[-1].file_id, caption=f"{header}\n\n{invisible_tag}")
+        await bot.send_photo(GROUP_ID, message.photo[-1].file_id, caption=f"{header}\n\n{hidden}")
 
     elif message.content_type == ContentType.STICKER:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Стикер){invisible_tag}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Стикер){hidden}")
         await bot.send_sticker(GROUP_ID, message.sticker.file_id)
 
     elif message.content_type == ContentType.VOICE:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Голосовое){invisible_tag}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Голосовое){hidden}")
         await bot.send_voice(GROUP_ID, message.voice.file_id)
 
     else:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Сообщение){invisible_tag}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Сообщение){hidden}")
 
-# Ответ из группы → пользователю
+# Ответ из группы → ЛС
 @dp.message(F.chat.id == GROUP_ID, F.reply_to_message)
 async def handle_group_reply(message: Message):
     original = message.reply_to_message
-    content = original.text or original.caption or ""
-    match = re.search(r"tg://user\?id=(\d+)", content)
+    text = original.text or original.caption or ""
+    match = re.search(r"tg://user\?id=(\d+)", text)
     if match:
         user_id = int(match.group(1))
 
@@ -112,9 +111,39 @@ async def handle_group_reply(message: Message):
         elif message.content_type == ContentType.VOICE:
             await bot.send_voice(chat_id=user_id, voice=message.voice.file_id, caption=message.caption)
 
+# Команда: /бан @юзер
+@dp.message(F.chat.id == GROUP_ID, F.text.startswith("/бан"))
+async def manual_ban(message: Message):
+    match = re.search(r"@?(\w+)", message.text)
+    if match:
+        username = match.group(1)
+        # найти user_id из reply
+        if message.reply_to_message:
+            reply = message.reply_to_message.text or message.reply_to_message.caption
+            id_match = re.search(r"tg://user\?id=(\d+)", reply)
+            if id_match:
+                user_id = int(id_match.group(1))
+                user_blocked[user_id] = time.time() + BLOCK_DURATION
+                await message.reply(f"⛔ Пользователь <code>{user_id}</code> заблокирован вручную на 30 минут.")
+
+# Команда: /разбан @юзер
+@dp.message(F.chat.id == GROUP_ID, F.text.startswith("/разбан"))
+async def manual_unban(message: Message):
+    if message.reply_to_message:
+        reply = message.reply_to_message.text or message.reply_to_message.caption
+        id_match = re.search(r"tg://user\?id=(\d+)", reply)
+        if id_match:
+            user_id = int(id_match.group(1))
+            if user_id in user_blocked:
+                del user_blocked[user_id]
+                await message.reply(f"✅ Пользователь <code>{user_id}</code> разблокирован.")
+            else:
+                await message.reply("Этот пользователь не в бане.")
+
 # Запуск
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
