@@ -12,15 +12,16 @@ GROUP_ID = -1002294772560
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# Словари для антиспама
+# Антиспам словари
 user_activity = {}
 user_blocked = {}
 
 # Настройки антиспама
-SPAM_LIMIT = 4            # сообщений
-SPAM_SECONDS = 10         # за 10 секунд
-BLOCK_DURATION = 60 * 30  # блокировка на 30 минут
+SPAM_LIMIT = 4            # макс. сообщений
+SPAM_SECONDS = 10         # за это время
+BLOCK_DURATION = 60 * 30  # бан: 30 минут
 
+# Приветствие
 WELCOME_TEXT = """
 ⋆｡°✩₊
 /ᐠ – ˕ –マ
@@ -47,27 +48,7 @@ WELCOME_TEXT = """
 async def handle_start(message: Message):
     await message.answer(WELCOME_TEXT)
 
-# Проверка на спам
-def is_spam(user_id):
-    now = time.time()
-
-    if user_id in user_blocked:
-        if now < user_blocked[user_id]:
-            return True
-        else:
-            del user_blocked[user_id]
-
-    user_activity.setdefault(user_id, [])
-    user_activity[user_id] = [t for t in user_activity[user_id] if now - t <= SPAM_SECONDS]
-    user_activity[user_id].append(now)
-
-    if len(user_activity[user_id]) > SPAM_LIMIT:
-        user_blocked[user_id] = now + BLOCK_DURATION
-        return True
-
-    return False
-
-# Получение всех сообщений от пользователя
+# Приём сообщений от пользователей
 @dp.message(F.chat.type == "private")
 async def handle_private(message: Message):
     user_id = message.from_user.id
@@ -75,11 +56,29 @@ async def handle_private(message: Message):
     header = f"Сообщение от @{username}"
     hidden = f"<code>[user_id:{user_id}]</code>"
 
-    # Спам-фильтр работает теперь на всё
-    if is_spam(user_id):
-        await message.answer("⏳ Вы слишком активно пишете. Пожалуйста, подождите немного.")
+    now = time.time()
+
+    # Проверка на активный бан
+    if user_id in user_blocked and now < user_blocked[user_id]:
+        await message.answer("⛔ Вы временно заблокированы за спам. Подождите 30 минут.")
         return
 
+    # Снятие бана по истечению времени
+    if user_id in user_blocked and now >= user_blocked[user_id]:
+        del user_blocked[user_id]
+
+    # Обновление активности
+    user_activity.setdefault(user_id, [])
+    user_activity[user_id] = [t for t in user_activity[user_id] if now - t <= SPAM_SECONDS]
+    user_activity[user_id].append(now)
+
+    # Проверка на спам
+    if len(user_activity[user_id]) > SPAM_LIMIT:
+        user_blocked[user_id] = now + BLOCK_DURATION
+        await message.answer("⛔ Вы были заблокированы за слишком частые сообщения. Подождите 30 минут.")
+        return
+
+    # Обработка типов сообщений
     if message.content_type == ContentType.TEXT:
         await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}\n\n{hidden}")
 
