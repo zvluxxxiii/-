@@ -12,7 +12,15 @@ GROUP_ID = -1002294772560
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# Приветственное сообщение
+# Антиспам настройки
+SPAM_LIMIT = 4
+SPAM_SECONDS = 10
+BLOCK_DURATION = 60 * 30  # 30 минут
+
+user_activity = {}
+user_blocked = {}
+
+# Приветствие
 WELCOME_TEXT = """
 ⋆｡°✩₊
 /ᐠ – ˕ –マ
@@ -35,23 +43,18 @@ WELCOME_TEXT = """
 укажи хештег в конце сообщения — например: #мики
 """
 
-# Антиспам
-SPAM_LIMIT = 4
-SPAM_SECONDS = 10
-BLOCK_DURATION = 60 * 30  # 30 минут
-
-user_activity = {}
-user_blocked = {}
-
+# Проверка спама
 def is_spam(user_id):
     now = time.time()
 
+    # Проверка бана
     if user_id in user_blocked:
         if now < user_blocked[user_id]:
             return True
         else:
             del user_blocked[user_id]
 
+    # Учет активности
     user_activity.setdefault(user_id, [])
     user_activity[user_id] = [t for t in user_activity[user_id] if now - t <= SPAM_SECONDS]
     user_activity[user_id].append(now)
@@ -62,48 +65,48 @@ def is_spam(user_id):
 
     return False
 
+# /start
 @dp.message(F.text == "/start", F.chat.type == "private")
 async def handle_start(message: Message):
     await message.answer(WELCOME_TEXT)
 
+# ЛС → в группу
 @dp.message(F.chat.type == "private")
 async def handle_private(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or "без ника"
-    header = f"Сообщение от @{username}"
+    header = f"Сообщение от @{username} (ID: {user_id})"
 
-    # Проверка на активный бан
-    if user_id in user_blocked and time.time() < user_blocked[user_id]:
-        await message.answer("⛔ Вы временно заблокированы за спам. Попробуйте позже.")
-        return
-
-    # Новый спам
     if is_spam(user_id):
-        await message.answer("⛔ Вы были заблокированы за спам. Подождите 30 минут.")
+        await message.answer("⛔ Вы были временно заблокированы за спам. Подождите 30 минут.")
         return
 
-    # Пересылка разных типов
     if message.content_type == ContentType.TEXT:
         await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}")
+
     elif message.content_type == ContentType.PHOTO:
         await bot.send_photo(GROUP_ID, message.photo[-1].file_id, caption=header)
+
     elif message.content_type == ContentType.STICKER:
         await bot.send_message(GROUP_ID, f"{header}\n\n(Стикер)")
         await bot.send_sticker(GROUP_ID, message.sticker.file_id)
+
     elif message.content_type == ContentType.VOICE:
         await bot.send_message(GROUP_ID, f"{header}\n\n(Голосовое)")
         await bot.send_voice(GROUP_ID, message.voice.file_id)
-    else:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Неподдерживаемый тип контента)")
 
-# Ответы из группы в ЛС
+    else:
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Неподдерживаемый тип)")
+
+# Ответ из группы → в ЛС
 @dp.message(F.chat.id == GROUP_ID, F.reply_to_message)
 async def handle_group_reply(message: Message):
     original = message.reply_to_message
     content = original.text or original.caption or ""
-    match = re.search(r"@([a-zA-Z0-9_]+).*ID:.*?(\d+)", content)
+    match = re.search(r"ID:\s*(\d+)", content)
+
     if match:
-        user_id = int(match.group(2))
+        user_id = int(match.group(1))
 
         if message.content_type == ContentType.TEXT:
             await bot.send_message(chat_id=user_id, text=message.text)
@@ -120,4 +123,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
