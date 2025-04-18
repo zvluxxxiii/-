@@ -1,3 +1,4 @@
+from antispam import is_banned, check_spam
 import asyncio
 import re
 from aiogram import Bot, Dispatcher, F
