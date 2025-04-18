@@ -11,6 +11,9 @@ GROUP_ID = -1002294772560
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
+# Хранилище: message_id в группе → user_id
+message_links = {}
+
 WELCOME_TEXT = """
 ⋆｡°✩₊
 /ᐠ – ˕ –マ
@@ -51,24 +54,40 @@ async def handle_private(message: Message):
         await message.answer("⚠️ Вы были заблокированы за спам на 30 минут.")
         return
 
+    # Пересылка сообщений в группу
     if message.content_type == ContentType.TEXT:
-        await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}")
+        sent = await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}")
     elif message.content_type == ContentType.PHOTO:
-        await bot.send_photo(GROUP_ID, message.photo[-1].file_id, caption=header)
+        sent = await bot.send_photo(GROUP_ID, message.photo[-1].file_id, caption=header)
     elif message.content_type == ContentType.STICKER:
         await bot.send_message(GROUP_ID, f"{header}\n\n(Стикер)")
-        await bot.send_sticker(GROUP_ID, message.sticker.file_id)
+        sent = await bot.send_sticker(GROUP_ID, message.sticker.file_id)
     elif message.content_type == ContentType.VOICE:
         await bot.send_message(GROUP_ID, f"{header}\n\n(Голосовое)")
-        await bot.send_voice(GROUP_ID, message.voice.file_id)
+        sent = await bot.send_voice(GROUP_ID, message.voice.file_id)
+    else:
+        sent = await bot.send_message(GROUP_ID, f"{header}\n\n(Неподдерживаемый тип)")
+
+    # Сохраняем связь: id сообщения в группе → user_id
+    message_links[sent.message_id] = user_id
 
 @dp.message(F.chat.id == GROUP_ID, F.reply_to_message)
 async def handle_group_reply(message: Message):
-    text = message.reply_to_message.text or message.reply_to_message.caption
-    match = re.search(r'@(\w+)', text)
-    if match:
-        username = match.group(1)
-        await message.answer(f"⛔ Бот не может ответить по username. Нужно вставлять user_id!")
+    original_id = message.reply_to_message.message_id
+    if original_id not in message_links:
+        await message.reply("⚠️ Не удалось определить пользователя. Ответь именно на сообщение от бота.")
+        return
+
+    user_id = message_links[original_id]
+
+    if message.content_type == ContentType.TEXT:
+        await bot.send_message(user_id, message.text)
+    elif message.content_type == ContentType.STICKER:
+        await bot.send_sticker(user_id, message.sticker.file_id)
+    elif message.content_type == ContentType.PHOTO:
+        await bot.send_photo(user_id, message.photo[-1].file_id, caption=message.caption)
+    elif message.content_type == ContentType.VOICE:
+        await bot.send_voice(user_id, message.voice.file_id)
 
 async def main():
     await dp.start_polling(bot)
