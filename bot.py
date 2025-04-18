@@ -5,18 +5,21 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode, ContentType
 from aiogram.types import Message
 
+# Токен и ID группы
 TOKEN = "7307810781:AAFUOkaJr1YfbYrMVa6J6wV6xUuesG1zDF8"
 GROUP_ID = -1002294772560
 
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
+# Словари для антиспама
 user_activity = {}
 user_blocked = {}
 
-SPAM_LIMIT = 4
-SPAM_SECONDS = 10
-BLOCK_DURATION = 60 * 30
+# Настройки антиспама
+SPAM_LIMIT = 4            # сообщений
+SPAM_SECONDS = 10         # за 10 секунд
+BLOCK_DURATION = 60 * 30  # блокировка на 30 минут
 
 WELCOME_TEXT = """
 ⋆｡°✩₊
@@ -44,7 +47,8 @@ WELCOME_TEXT = """
 async def handle_start(message: Message):
     await message.answer(WELCOME_TEXT)
 
-def is_spammer(user_id: int) -> bool:
+# Проверка на спам
+def is_spam(user_id):
     now = time.time()
 
     if user_id in user_blocked:
@@ -54,51 +58,51 @@ def is_spammer(user_id: int) -> bool:
             del user_blocked[user_id]
 
     user_activity.setdefault(user_id, [])
-    user_activity[user_id] = [t for t in user_activity[user_id] if now - t < SPAM_SECONDS]
+    user_activity[user_id] = [t for t in user_activity[user_id] if now - t <= SPAM_SECONDS]
     user_activity[user_id].append(now)
 
     if len(user_activity[user_id]) > SPAM_LIMIT:
         user_blocked[user_id] = now + BLOCK_DURATION
-        asyncio.create_task(bot.send_message(GROUP_ID, f"⚠️ Пользователь <code>{user_id}</code> автоматически заблокирован на 30 минут за спам."))
         return True
 
     return False
 
-# ЛС → группа
+# Получение всех сообщений от пользователя
 @dp.message(F.chat.type == "private")
 async def handle_private(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or "без ника"
     header = f"Сообщение от @{username}"
-    hidden = f"<a href='tg://user?id={user_id}'>\u2063</a>"  # невидимый user_id
+    hidden = f"<code>[user_id:{user_id}]</code>"
 
-    if is_spammer(user_id):
-        await message.answer("⏳ Вы временно заблокированы за спам. Подождите немного.")
+    # Спам-фильтр работает теперь на всё
+    if is_spam(user_id):
+        await message.answer("⏳ Вы слишком активно пишете. Пожалуйста, подождите немного.")
         return
 
     if message.content_type == ContentType.TEXT:
-        await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}{hidden}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n{message.text}\n\n{hidden}")
 
     elif message.content_type == ContentType.PHOTO:
         await bot.send_photo(GROUP_ID, message.photo[-1].file_id, caption=f"{header}\n\n{hidden}")
 
     elif message.content_type == ContentType.STICKER:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Стикер){hidden}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Стикер)\n\n{hidden}")
         await bot.send_sticker(GROUP_ID, message.sticker.file_id)
 
     elif message.content_type == ContentType.VOICE:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Голосовое){hidden}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Голосовое)\n\n{hidden}")
         await bot.send_voice(GROUP_ID, message.voice.file_id)
 
     else:
-        await bot.send_message(GROUP_ID, f"{header}\n\n(Сообщение){hidden}")
+        await bot.send_message(GROUP_ID, f"{header}\n\n(Неподдерживаемый тип)\n\n{hidden}")
 
-# Ответ из группы → ЛС
+# Ответы из группы → пользователю
 @dp.message(F.chat.id == GROUP_ID, F.reply_to_message)
 async def handle_group_reply(message: Message):
     original = message.reply_to_message
-    text = original.text or original.caption or ""
-    match = re.search(r"tg://user\?id=(\d+)", text)
+    content = original.text or original.caption or ""
+    match = re.search(r"user_id:(\d+)", content)
     if match:
         user_id = int(match.group(1))
 
@@ -111,39 +115,9 @@ async def handle_group_reply(message: Message):
         elif message.content_type == ContentType.VOICE:
             await bot.send_voice(chat_id=user_id, voice=message.voice.file_id, caption=message.caption)
 
-# Команда: /бан @юзер
-@dp.message(F.chat.id == GROUP_ID, F.text.startswith("/бан"))
-async def manual_ban(message: Message):
-    match = re.search(r"@?(\w+)", message.text)
-    if match:
-        username = match.group(1)
-        # найти user_id из reply
-        if message.reply_to_message:
-            reply = message.reply_to_message.text or message.reply_to_message.caption
-            id_match = re.search(r"tg://user\?id=(\d+)", reply)
-            if id_match:
-                user_id = int(id_match.group(1))
-                user_blocked[user_id] = time.time() + BLOCK_DURATION
-                await message.reply(f"⛔ Пользователь <code>{user_id}</code> заблокирован вручную на 30 минут.")
-
-# Команда: /разбан @юзер
-@dp.message(F.chat.id == GROUP_ID, F.text.startswith("/разбан"))
-async def manual_unban(message: Message):
-    if message.reply_to_message:
-        reply = message.reply_to_message.text or message.reply_to_message.caption
-        id_match = re.search(r"tg://user\?id=(\d+)", reply)
-        if id_match:
-            user_id = int(id_match.group(1))
-            if user_id in user_blocked:
-                del user_blocked[user_id]
-                await message.reply(f"✅ Пользователь <code>{user_id}</code> разблокирован.")
-            else:
-                await message.reply("Этот пользователь не в бане.")
-
 # Запуск
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
