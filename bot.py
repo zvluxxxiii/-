@@ -6,7 +6,7 @@ from aiogram.types import Message
 from aiogram.enums import ParseMode, ContentType
 
 # Токен и ID группы
-TOKEN = "7307810781:AAFUOkaJr1YfbYrMVa6J6wV6xUuesG1zDF8"
+TOKEN = "7307810781:AAEgj8gChK4Xi-fP7ZrFdLAn333gCsRwBuY"
 GROUP_ID = -1002294772560
 
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
